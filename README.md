@@ -22,18 +22,20 @@ DSH 自带的 Web 界面只监听 `127.0.0.1`（本机回环），手机永远�
 ## 安装
 
 ```powershell
-# 从 npm（发布之后）
+# 从 GitHub（推荐，永远可用）
+dsh plugin add github:wlxyxykj/dsh-phone-remote
+dsh plugin add github:wlxyxykj/dsh-phone-remote#v1.0.0   # 指定版本
+
+# 从 npm（发布后可用）
 dsh plugin add dsh-phone-remote
 
 # 从本地目录 / 打好的 tarball
 dsh plugin add "C:\path\to\dsh-phone-remote"
-dsh plugin add "C:\path\to\dsh-phone-remote-1.2.2.tgz"
-
-# 从 GitHub
-dsh plugin add github:<user>/<repo>
+dsh plugin add "C:\path\to\dsh-phone-remote-1.0.0.tgz"
 ```
 
-也可以在 DSH 的「设置 → 插件」里选择本地 `.tgz` 或用包名安装。
+也可以在 DSH 的「设置 → 插件」里选择本地 `.tgz`，或用包名/git 地址安装。
+从 GitHub 装的是仓库源码，本插件没有构建步骤，装完即用。
 
 > ### ⚠️ 安装/升级后需要重启一次 DSH Desktop
 >
