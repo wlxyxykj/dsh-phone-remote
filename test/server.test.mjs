@@ -5,6 +5,9 @@
 
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { MobileServer, mintToken, addressMatches, isAddressPattern, normalizeAddress } from "../lib/server.js";
 import { isPrivateIpv4 } from "../lib/net.js";
 
@@ -33,6 +36,14 @@ function stubBridge() {
 		cancel(sessionId) {
 			this.calls.push(["cancel", sessionId]);
 			return { accepted: true };
+		},
+		async saveUpload(sessionId, name, source, maxBytes) {
+			this.calls.push(["upload", sessionId, name]);
+			let bytes = 0;
+			for await (const chunk of source) bytes += chunk.length;
+			// A tiny cap keeps the oversized case cheap to exercise.
+			if (bytes > 8) throw Object.assign(new Error("文件超过 25 MB 上限"), { code: "file-too-large" });
+			return { name, path: `.phone-uploads/${name}`, absolute: `C:\\work\\${name}`, bytes, insideWorkspace: true };
 		},
 		async *follow(request, signal) {
 			this.calls.push(["follow", request.sessionId]);
@@ -174,6 +185,100 @@ describe("phone-remote server", () => {
 		});
 		assert.equal(res.status, 200);
 		assert.equal((await res.json()).sessionId, "session-9");
+	});
+
+	it("accepts a file upload and hands it to the bridge", async () => {
+		const res = await fetch(`${base}/api/m/upload?session=session-1&name=note.txt`, {
+			method: "POST",
+			headers: { "x-mobile-token": "test-token-123", "content-type": "application/octet-stream" },
+			body: Buffer.from("hello !")
+		});
+		assert.equal(res.status, 200);
+		const data = await res.json();
+		assert.equal(data.ok, true);
+		assert.equal(data.bytes, 7);
+		assert.equal(data.path, ".phone-uploads/note.txt");
+		const call = bridge.calls.filter((entry) => entry[0] === "upload").pop();
+		assert.deepEqual(call, ["upload", "session-1", "note.txt"]);
+	});
+
+	it("refuses an upload without a session or over the size cap", async () => {
+		const noSession = await fetch(`${base}/api/m/upload?name=x.txt`, {
+			method: "POST",
+			headers: { "x-mobile-token": "test-token-123" },
+			body: "abc"
+		});
+		assert.equal(noSession.status, 400);
+
+		const tooBig = await fetch(`${base}/api/m/upload?session=session-1&name=big.bin`, {
+			method: "POST",
+			headers: { "x-mobile-token": "test-token-123" },
+			body: Buffer.alloc(64, 1)
+		});
+		assert.equal(tooBig.status, 413);
+		assert.match((await tooBig.json()).error.message, /上限/);
+	});
+
+	it("streams a file the agent pushed to the phone", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "phone-deliver-"));
+		const file = join(directory, "报表.csv");
+		writeFileSync(file, "a,b\n1,2\n", "utf8");
+		const headers = { "x-mobile-token": "test-token-123" };
+		const id = server.registerDeliverable({ sessionId: "session-1", path: file, name: "报表.csv", bytes: 8, note: "结果" });
+		try {
+			const res = await fetch(`${base}/api/m/download/${id}`, { headers });
+			assert.equal(res.status, 200);
+			assert.match(res.headers.get("content-type") ?? "", /text\/csv/);
+			const disposition = res.headers.get("content-disposition") ?? "";
+			assert.match(disposition, /attachment/);
+			assert.equal(decodeURIComponent(disposition).includes("报表.csv"), true, "non-ASCII names survive");
+			assert.equal(await res.text(), "a,b\n1,2\n");
+
+			assert.equal((await fetch(`${base}/api/m/download/nope`, { headers })).status, 404);
+			assert.equal((await fetch(`${base}/api/m/download/${id}`)).status, 401, "downloads need the token too");
+
+			rmSync(file);
+			assert.equal((await fetch(`${base}/api/m/download/${id}`, { headers })).status, 410, "a deleted file reports gone");
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+
+	it("pushes a deliverable onto an open phone stream and lists it in the state", async () => {
+		const controller = new AbortController();
+		const stream = await fetch(`${base}/api/m/stream?session=session-1`, {
+			headers: { "x-mobile-token": "test-token-123" },
+			signal: controller.signal
+		});
+		const reader = stream.body.getReader();
+		const decoder = new TextDecoder();
+		let received = "";
+		const readUntil = async (needle, budget = 40) => {
+			for (let step = 0; step < budget && !received.includes(needle); step++) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				received += decoder.decode(value, { stream: true });
+			}
+			return received.includes(needle);
+		};
+
+		try {
+			assert.equal(await readUntil("event: hello"), true, "the stream opened");
+			const directory = mkdtempSync(join(tmpdir(), "phone-push-"));
+			const file = join(directory, "out.txt");
+			writeFileSync(file, "done", "utf8");
+			server.registerDeliverable({ sessionId: "session-1", path: file, name: "out.txt", bytes: 4 });
+			// `event: deliverable\ndata:` distinguishes the single push from the
+			// `event: deliverables` replay that opens the stream.
+			assert.equal(await readUntil("event: deliverable\ndata:"), true, "the phone is told immediately");
+			assert.equal(received.includes('"name":"out.txt"'), true);
+
+			const state = await (await fetch(`${base}/api/m/state`, { headers: { "x-mobile-token": "test-token-123" } })).json();
+			assert.equal(state.deliverables.some((entry) => entry.name === "out.txt"), true, "and survives a refresh");
+			rmSync(directory, { recursive: true, force: true });
+		} finally {
+			controller.abort();
+		}
 	});
 
 	it("refuses actions the configuration disabled", async () => {

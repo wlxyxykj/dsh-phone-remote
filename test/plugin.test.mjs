@@ -289,9 +289,8 @@ describe("dsh-phone-remote plugin", () => {
 	it("registers a registry-valid phone_remote tool and returns the link", async () => {
 		const mounted = await mount();
 		try {
-			assert.equal(mounted.tools.length, 1);
-			const tool = mounted.tools[0];
-			assert.equal(tool.name, "phone_remote");
+			assert.deepEqual(mounted.tools.map((entry) => entry.name).sort(), ["phone_remote", "phone_send_file"]);
+			const tool = mounted.tools.find((entry) => entry.name === "phone_remote");
 			assert.equal(typeof tool.execute, "function");
 			// Contract enforced by ctx.tools.register(): output + render + JSON Schema.
 			assert.equal(typeof tool.output, "object");
@@ -313,6 +312,37 @@ describe("dsh-phone-remote plugin", () => {
 			const fallback = await tool.execute({});
 			assert.match(fallback.text, /手机遥控链接/, "no action defaults to link");
 		} finally {
+			await mounted.dispose();
+		}
+	});
+
+	it("lets the agent push a produced file to the phone", async () => {
+		const mounted = await mount();
+		const directory = mkdtempSync(join(tmpdir(), "phone-tool-"));
+		try {
+			const tool = mounted.tools.find((entry) => entry.name === "phone_send_file");
+			assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["name", "note", "path"]);
+			assert.deepEqual(tool.parameters.required, ["path"]);
+
+			const file = join(directory, "报告.md");
+			writeFileSync(file, "# 报告\n", "utf8");
+			const result = await tool.execute({ path: file, note: "刚生成" }, { agent: { id: "s-live" } });
+			assert.match(result.text, /已发送到手机：报告\.md/);
+			assert.deepEqual(tool.output.render({}, result), [{ type: "text", text: result.text }]);
+
+			const state = await (await fetch(`${mounted.base}/api/m/state`, { headers: { "x-mobile-token": TOKEN } })).json();
+			const entry = state.deliverables.find((item) => item.name === "报告.md");
+			assert.ok(entry, "the deliverable is registered");
+			assert.equal(entry.bytes, Buffer.byteLength("# 报告\n"));
+			assert.equal(entry.note, "刚生成");
+
+			// A relative path resolves against the session's working directory
+			// (that resolution itself is covered in test/session.test.mjs).
+			await assert.rejects(() => tool.execute({ path: join(directory, "missing.txt") }, {}), /找不到文件/);
+			await assert.rejects(() => tool.execute({ path: directory }, {}), /不是一个文件/);
+			await assert.rejects(() => tool.execute({ path: "" }, {}), /path 不能为空/);
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
 			await mounted.dispose();
 		}
 	});

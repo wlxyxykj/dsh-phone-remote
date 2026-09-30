@@ -92,6 +92,23 @@ header .sub{font-size:11.5px;color:var(--fg-faint);white-space:nowrap;overflow:h
   word-break:break-word;max-height:40vh;overflow-y:auto}
 .think.pending summary{color:var(--fg-dim)}
 
+/* ── file transfer ──────────────────────────────────────────────────── */
+#pending{display:flex;flex-wrap:wrap;gap:6px;padding:0 2px 8px}
+.chip{display:flex;align-items:center;gap:6px;max-width:100%;background:var(--bg-3);border:1px solid var(--line);
+  border-radius:999px;padding:4px 10px;font-size:12px;color:var(--fg-dim)}
+.chip .n{max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip .x{color:var(--fg-faint);font-size:13px;padding:0 2px}
+.chip.up{border-color:#3c5c96;color:var(--fg)}
+.chip.bad{border-color:rgba(255,107,107,.5);color:#ffd9d9}
+.filecard{align-self:flex-start;max-width:92%;width:100%;display:flex;align-items:center;gap:10px;
+  background:#0d1620;border:1px solid #2b4a6f;border-radius:12px;padding:10px 12px;text-decoration:none;color:var(--fg)}
+.filecard .ic{font-size:20px;flex:none}
+.filecard .meta{min-width:0;flex:1}
+.filecard .meta .t{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.filecard .meta .d{font-size:11.5px;color:var(--fg-faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.filecard .dl{font-size:12px;color:#7fb2ff;flex:none}
+.attach{width:42px;height:42px;font-size:17px;padding:0}
+
 .tool{
   align-self:flex-start;max-width:92%;width:100%;
   background:#0e141d;border:1px solid var(--line);border-radius:12px;overflow:hidden;
@@ -219,10 +236,13 @@ header .sub{font-size:11.5px;color:var(--fg-faint);white-space:nowrap;overflow:h
   <div id="log"></div>
 
   <div id="composer">
+    <div id="pending" class="hidden"></div>
     <div class="box">
-      <textarea id="text" rows="1" placeholder="给电脑上的 Agent 派活…" enterkeyhint="send"></textarea>
+      <button class="icon-btn attach" id="btn-attach" aria-label="上传文件">📎</button>
+      <textarea id="text" rows="1" placeholder="给电脑上的 Agent 派活，或先用 📎 传个文件…" enterkeyhint="send"></textarea>
       <button class="send" id="btn-send" aria-label="发送">↑</button>
     </div>
+    <input type="file" id="file-input" multiple hidden>
     <div class="hint">
       <span id="c-hint">未选择会话</span>
       <span id="c-tip">发送 = 排队执行</span>
@@ -262,6 +282,8 @@ window.__mobileRemoteBooted = true;
     retry: 0,
     live: null,          // { el, text } streaming assistant bubble
     thinking: null,      // the live "💭 思考中…" placeholder element
+    pending: [],         // files uploaded from this phone, waiting to be sent
+    delivered: {},       // deliverable ids already rendered as download cards
     toolEls: {},         // callId -> { el, statusEl, outEl }
     started: false
   };
@@ -663,6 +685,14 @@ window.__mobileRemoteBooted = true;
         if (n.message) addBubble(n.level === "error" ? "err" : "sys", n.message);
       } catch (e) {}
     });
+    es.addEventListener("deliverable", function (evt) {
+      try { addFileCard(JSON.parse(evt.data)); } catch (e) {}
+    });
+    es.addEventListener("deliverables", function (evt) {
+      try {
+        (JSON.parse(evt.data) || []).forEach(addFileCard);
+      } catch (e) {}
+    });
     es.addEventListener("error", function () {
       if (es.readyState === EventSource.CLOSED || es.readyState === 2) {
         setStatus("off", "连接断开，重连中…");
@@ -697,6 +727,7 @@ window.__mobileRemoteBooted = true;
       $("newcwd").placeholder = state.defaultCwd || "新会话工作目录（可选）";
       renderSessions();
       refreshTitle();
+      ((data && data.deliverables) || []).forEach(addFileCard);
       return data;
     });
   }
@@ -751,13 +782,19 @@ window.__mobileRemoteBooted = true;
     var ta = $("text");
     var value = ta.value.trim();
     if (state.running) { stop(); return; }
-    if (!value) return;
+    var files = state.pending.filter(function (item) { return item.state === "ok"; });
+    if (!value && files.length === 0) return;
     if (!state.sessionId) { addBubble("err", "请先在左上角选择一个会话"); return; }
+
+    var shown = value;
+    files.forEach(function (item) { shown += (shown ? "\n" : "") + "📎 " + item.name; });
     ta.value = "";
     autoGrow();
-    addBubble("me", value);
+    addBubble("me", shown);
+    state.pending = [];
+    renderPending();
     setRunning(true);
-    api("/api/m/prompt", { method: "POST", body: { sessionId: state.sessionId, text: value, timeZone: timezone() } })
+    api("/api/m/prompt", { method: "POST", body: { sessionId: state.sessionId, text: buildPrompt(value, files), timeZone: timezone() } })
       .then(function () {})
       .catch(function (err) {
         setRunning(false);
@@ -765,6 +802,101 @@ window.__mobileRemoteBooted = true;
         ta.value = value;
         autoGrow();
       });
+  }
+
+  /** Uploaded files become a plain file list in the prompt: the agent reads them. */
+  function buildPrompt(value, files) {
+    if (files.length === 0) return value;
+    var lines = ["📎 用户从手机上传了 " + files.length + " 个文件，已经放在工作目录里："];
+    files.forEach(function (item) {
+      lines.push("- " + item.path + "（原名 " + item.name + "，" + formatBytes(item.bytes) + "）");
+    });
+    lines.push("");
+    lines.push(value || "请把这些文件处理一下。");
+    return lines.join("\n");
+  }
+
+  function uploadFiles(fileList) {
+    if (!state.sessionId) { addBubble("err", "请先选择一个会话，再传文件"); return; }
+    var files = Array.prototype.slice.call(fileList);
+    files.forEach(function (file) {
+      var item = { name: file.name, bytes: file.size, path: "", state: "up" };
+      state.pending.push(item);
+      renderPending();
+      fetch("/api/m/upload?session=" + encodeURIComponent(state.sessionId) + "&name=" + encodeURIComponent(file.name), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: state.token ? { "x-mobile-token": state.token } : {},
+        body: file
+      })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            if (!res.ok) throw new Error((data.error && data.error.message) || ("HTTP " + res.status));
+            return data;
+          });
+        })
+        .then(function (data) {
+          item.path = data.path || data.absolute || file.name;
+          item.bytes = typeof data.bytes === "number" ? data.bytes : file.size;
+          item.state = "ok";
+          if (data.insideWorkspace === false) {
+            addBubble("sys", "注意：这个会话没有工作目录，文件放在 " + item.path + "，Agent 可能读不到它。");
+          }
+          renderPending();
+        })
+        .catch(function (err) {
+          item.state = "bad";
+          renderPending();
+          addBubble("err", "上传失败（" + item.name + "）：" + (err.message || err));
+        });
+    });
+  }
+
+  function renderPending() {
+    var box = $("pending");
+    box.textContent = "";
+    if (state.pending.length === 0) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    state.pending.forEach(function (item, index) {
+      var chip = el("div", "chip " + (item.state === "bad" ? "bad" : item.state === "ok" ? "up" : ""));
+      var icon = item.state === "up" ? "⏳ " : item.state === "bad" ? "⚠️ " : "📎 ";
+      chip.appendChild(el("span", "n", icon + item.name));
+      if (item.state === "ok" && item.bytes) chip.appendChild(el("span", null, formatBytes(item.bytes)));
+      var remove = el("span", "x", "✕");
+      remove.addEventListener("click", function () {
+        state.pending.splice(index, 1);
+        renderPending();
+      });
+      chip.appendChild(remove);
+      box.appendChild(chip);
+    });
+  }
+
+  function formatBytes(bytes) {
+    if (typeof bytes !== "number") return "";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  /** A file the agent sent: a plain link the phone browser can download. */
+  function addFileCard(info) {
+    if (!info || !info.id || state.delivered[info.id]) return;
+    state.delivered[info.id] = true;
+    var url = "/api/m/download/" + encodeURIComponent(info.id) + (state.token ? "?t=" + encodeURIComponent(state.token) : "");
+    var card = el("a", "filecard");
+    card.href = url;
+    card.setAttribute("download", info.name || "file");
+    card.appendChild(el("span", "ic", "📄"));
+    var meta = el("div", "meta");
+    meta.appendChild(el("div", "t", info.name || "file"));
+    var bits = [formatBytes(info.bytes)].filter(Boolean);
+    if (info.note) bits.push(info.note);
+    meta.appendChild(el("div", "d", bits.join(" · ") || "点击下载"));
+    card.appendChild(meta);
+    card.appendChild(el("span", "dl", "下载 ↓"));
+    $("log").appendChild(card);
+    scrollDown(true);
   }
   function stop() {
     if (!state.sessionId) return;
@@ -818,6 +950,15 @@ window.__mobileRemoteBooted = true;
   }
 
   $("btn-send").addEventListener("click", send);
+  $("btn-attach").addEventListener("click", function () {
+    if (!state.sessionId) { addBubble("err", "请先选择一个会话，再传文件"); return; }
+    $("file-input").click();
+  });
+  $("file-input").addEventListener("change", function (event) {
+    var files = event.target.files;
+    if (files && files.length) uploadFiles(files);
+    event.target.value = "";
+  });
   $("text").addEventListener("input", autoGrow);
   $("text").addEventListener("keydown", function (e) {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }

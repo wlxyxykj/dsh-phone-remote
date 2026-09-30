@@ -1,6 +1,6 @@
 {
   "name": "dsh-phone-remote",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Phone control for DeepSeek Harness: a token-protected mobile page served from this computer, with an optional IP allowlist, so you can drive the agent from your phone — list sessions, send prompts, watch live output, cancel a turn. 手机遥控：打开链接/扫码即可在手机上指挥电脑上的 DSH Agent 干活，支持 IP 白名单与 Tailscale。",
   "license": "MIT",
   "author": "tofar",

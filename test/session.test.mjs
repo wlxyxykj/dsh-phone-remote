@@ -1,11 +1,19 @@
 /**
  * SessionBridge tests: the exact shape of what reaches the DSH services, the
- * approval-policy ordering, and the failure messages the phone will see.
+ * approval-policy ordering, the upload writer, and the failure messages the
+ * phone will see.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { SessionBridge } from "../lib/session.js";
+import { mkdtempSync, readFileSync, readdirSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { SessionBridge, safeFileName } from "../lib/session.js";
+
+// Never touch the real ~/.dsh while testing the upload fallback directory.
+process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "phone-remote-session-"));
 
 const silent = { info() {}, warn() {}, error() {} };
 
@@ -186,5 +194,82 @@ describe("SessionBridge", () => {
 		const on = new SessionBridge(fakeCtx({ sessionController: fakeController() }), {}, silent);
 		assert.equal(on.allowsCreate, true);
 		assert.equal(on.allowsCancel, true);
+	});
+});
+
+describe("uploads", () => {
+	/** A bridge whose one session lives in `cwd`. */
+	function bridgeIn(cwd) {
+		const controller = fakeController({
+			async list() {
+				return { items: cwd === undefined ? [] : [{ sessionId: "s-live", running: false, blank: false, updatedAt: 1, cwd }] };
+			}
+		});
+		return new SessionBridge(fakeCtx({ sessionController: controller }), {}, silent);
+	}
+
+	it("sanitizes client-supplied file names", () => {
+		assert.equal(safeFileName("report.pdf"), "report.pdf");
+		assert.equal(safeFileName("../../etc/passwd"), "passwd");
+		assert.equal(safeFileName("C:\\Users\\someone\\.ssh\\id_rsa"), "id_rsa");
+		assert.equal(safeFileName("...hidden"), "hidden");
+		assert.equal(safeFileName("a\u0000b<>:\"|?*.txt"), "a_b_______.txt");
+		assert.equal(safeFileName(""), "file");
+		assert.equal(safeFileName("   "), "file");
+		assert.equal(safeFileName("x".repeat(300)).length, 120);
+	});
+
+	it("writes the upload into the session working directory", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "phone-cwd-"));
+		const bridge = bridgeIn(cwd);
+		const saved = await bridge.saveUpload("s-live", "笔记.txt", Readable.from([Buffer.from("hello "), Buffer.from("world")]), 1024);
+
+		assert.equal(saved.name, "笔记.txt");
+		assert.equal(saved.bytes, 11);
+		assert.equal(saved.insideWorkspace, true);
+		assert.match(saved.path, /^\.phone-uploads\/\d{8}-\d{6}-笔记\.txt$/, "the agent gets a workspace-relative path");
+		assert.equal(readFileSync(saved.absolute, "utf8"), "hello world");
+		assert.equal(existsSync(saved.absolute), true);
+		assert.equal(saved.absolute.startsWith(cwd), true);
+	});
+
+	it("keeps two uploads with the same name apart", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "phone-cwd-"));
+		const bridge = bridgeIn(cwd);
+		const first = await bridge.saveUpload("s-live", "a.txt", Readable.from(["one"]), 1024);
+		await new Promise((resolve) => setTimeout(resolve, 1100)); // different second in the stamp
+		const second = await bridge.saveUpload("s-live", "a.txt", Readable.from(["two"]), 1024);
+		assert.notEqual(first.absolute, second.absolute);
+		assert.equal(readFileSync(first.absolute, "utf8"), "one");
+		assert.equal(readFileSync(second.absolute, "utf8"), "two");
+	});
+
+	it("aborts an oversized upload and leaves no partial file", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "phone-cwd-"));
+		const bridge = bridgeIn(cwd);
+		await assert.rejects(
+			() => bridge.saveUpload("s-live", "big.bin", Readable.from([Buffer.alloc(4096)]), 1024),
+			(error) => error.code === "file-too-large" && /1 MB|1024|上限/.test(error.message)
+		);
+		const leftovers = existsSync(join(cwd, ".phone-uploads")) ? readdirSync(join(cwd, ".phone-uploads")) : [];
+		assert.equal(leftovers.some((name) => name.endsWith(".part")), false, "no partial file survives");
+		assert.equal(leftovers.length, 0);
+	});
+
+	it("falls back to $DSH_HOME when the session has no working directory", async () => {
+		const bridge = bridgeIn(undefined);
+		const saved = await bridge.saveUpload("s-live", "a.txt", Readable.from(["x"]), 1024);
+		assert.equal(saved.insideWorkspace, false);
+		assert.equal(saved.path, saved.absolute, "outside the workspace the agent needs the absolute path");
+		assert.match(saved.absolute, /phone-remote-uploads/);
+		assert.equal(readFileSync(saved.absolute, "utf8"), "x");
+	});
+
+	it("respects the configured default directory when the session is cold", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "phone-cwd-"));
+		const bridge = new SessionBridge(fakeCtx({ sessionController: fakeController({ async list() { return { items: [] }; } }) }), { cwd }, silent);
+		const saved = await bridge.saveUpload("s-live", "b.txt", Readable.from(["y"]), 1024);
+		assert.equal(saved.insideWorkspace, true);
+		assert.equal(saved.absolute.startsWith(cwd), true);
 	});
 });
