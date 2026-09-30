@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="referrer" content="no-referrer">
+<title>DSH 手机遥控 · 控制台</title>
+<style>
+:root{
+  --bg:#0b0f16;--card:#121a26;--card2:#0e141d;--line:#26334a;--fg:#e8eef8;--dim:#93a2b8;--faint:#64748b;
+  --accent:#4c8dff;--ok:#3ddc97;--warn:#ffb454;--err:#ff6b6b;
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(1200px 700px at 15% -10%,#16233c 0%,var(--bg) 55%);color:var(--fg);
+  font:15px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;min-height:100vh}
+.wrap{max-width:940px;margin:0 auto;padding:40px 22px 70px;display:flex;flex-direction:column;gap:20px}
+h1{font-size:22px;margin:0;display:flex;align-items:center;gap:10px}
+h1 .badge{font-size:11.5px;font-weight:500;color:var(--ok);border:1px solid rgba(61,220,151,.4);
+  background:rgba(61,220,151,.1);padding:2px 9px;border-radius:999px}
+.sub{color:var(--dim);font-size:13.5px;margin:0}
+.card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:16px;padding:20px}
+.card h2{font-size:15px;margin:0 0 4px}
+.card .hint{color:var(--faint);font-size:12.5px;margin:0 0 14px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:22px;align-items:start}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.urlrow{display:flex;align-items:center;gap:10px;background:#070b12;border:1px solid var(--line);
+  border-radius:11px;padding:10px 12px;margin-bottom:9px}
+.urlrow .u{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;
+  overflow-wrap:anywhere;color:#d8e6ff}
+.urlrow .tag{font-size:11px;color:var(--faint);flex:none;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.urlrow.primary{border-color:#3c5c96;box-shadow:0 0 0 3px rgba(76,141,255,.09)}
+button{font:inherit;color:inherit;background:#1b2637;border:1px solid var(--line);border-radius:10px;
+  padding:8px 13px;cursor:pointer;white-space:nowrap}
+button:hover{background:#22304a}
+button.p{background:linear-gradient(180deg,var(--accent),#2f6fe0);border-color:transparent;color:#fff}
+#qr{background:#fff;border-radius:14px;padding:12px;width:236px;height:236px;display:block;margin:0 auto}
+.qrcap{text-align:center;color:var(--dim);font-size:12.5px;margin-top:10px}
+.token{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#ffd9a8;overflow-wrap:anywhere}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #1b2433}
+.row:last-child{border-bottom:none}
+.row .k{color:var(--dim);font-size:13px}
+.row .v{font-size:13.5px;text-align:right;overflow-wrap:anywhere}
+.sess{display:flex;justify-content:space-between;gap:12px;padding:9px 11px;border-radius:10px;background:#0d141e;
+  border:1px solid #1c2637;margin-bottom:7px;font-size:13px}
+.sess .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .m{color:var(--faint);font-size:11.5px;flex:none}
+.pill{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim);flex:none}
+.pill.run{color:var(--warn);border-color:rgba(255,180,84,.45);background:rgba(255,180,84,.1)}
+ol{margin:6px 0 0;padding-left:20px;color:var(--dim);font-size:13.5px}
+ol li{margin:3px 0}
+code{background:#000a;padding:1px 6px;border-radius:5px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+.warn{border-color:rgba(255,180,84,.35);background:linear-gradient(180deg,rgba(255,180,84,.06),rgba(255,180,84,.02))}
+.foot{color:var(--faint);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>📱 DSH 手机遥控 <span class="badge" id="listen">启动中…</span></h1>
+    <p class="sub">用手机浏览器打开下面的链接，就能在手机上指挥这台电脑上的 Agent 干活：看会话、发指令、实时看输出、随时喊停。</p>
+  </div>
+
+  <div class="card">
+    <div class="grid">
+      <div>
+        <h2>手机访问链接</h2>
+        <p class="hint">手机需要和电脑连同一个 Wi-Fi / 局域网。点击链接即可复制。</p>
+        <div id="urls"></div>
+        <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:14px">
+          <button class="p" id="copy-primary">复制主链接</button>
+          <button id="rotate">重置口令（旧链接立即失效）</button>
+        </div>
+      </div>
+      <div>
+        <canvas id="qr" width="236" height="236"></canvas>
+        <div class="qrcap">用手机相机扫码直接打开</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>状态</h2>
+    <p class="hint">口令保存在 <code id="statefile">~/.dsh/dsh-phone-remote.json</code>，重启 DSH 后链接不变。</p>
+    <div class="row"><span class="k">监听地址</span><span class="v" id="s-listen">—</span></div>
+    <div class="row"><span class="k">访问口令</span><span class="v"><span class="token" id="s-token">—</span>
+      <button id="copy-token" style="margin-left:8px">复制</button>
+      <button id="reveal" style="margin-left:6px">显示</button></span></div>
+    <div class="row"><span class="k">会话数 / 运行中</span><span class="v" id="s-sessions">—</span></div>
+    <div class="row"><span class="k">新会话默认目录</span><span class="v" id="s-cwd">—</span></div>
+  </div>
+
+  <div class="card">
+    <h2>访问控制</h2>
+    <p class="hint">默认<strong>开放</strong>：任何能连到本机的设备都能打开登录页（仍需口令）。启用「仅白名单」后，只有名单里的 IP 能访问，其余一律 403。</p>
+    <div class="row"><span class="k">当前模式</span><span class="v" id="a-mode">—</span></div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap;margin:12px 0 4px">
+      <button class="p" id="a-toggle">启用「仅白名单」</button>
+      <button id="a-clear">清空白名单并恢复开放</button>
+    </div>
+    <div style="font-size:13px;color:var(--dim);margin:14px 0 6px">白名单</div>
+    <div id="a-ips"></div>
+    <div style="font-size:13px;color:var(--dim);margin:14px 0 6px">最近访问的客户端（手机换网络后新 IP 会出现在这里，点「允许」即可）</div>
+    <div id="a-recent"></div>
+  </div>
+
+  <div class="card">
+    <h2>会话（手机可接管的）</h2>
+    <p class="hint">最近有活动的会话排在最前面；手机上可以随时切换。</p>
+    <div id="sessions"></div>
+  </div>
+
+  <div class="card warn">
+    <h2>安全须知</h2>
+    <ol>
+      <li>链接里的口令就是全部凭证：拿到它的人可以在你的电脑上让 Agent 执行操作。别把链接发到群里或截图发出去。</li>
+      <li>这台电脑有公网 IP 时，<code>8790</code> 端口对全网可见——请在「访问控制」里启用「仅白名单」，只放行你手机的 IP。</li>
+      <li>手机用移动数据时 IP 会变：变了就在上面的「最近访问」里点一下「允许」。</li>
+      <li>公共 Wi-Fi 下建议用完就在配置里设 <code>enabled: false</code>，或点上面的“重置口令”。</li>
+      <li>默认给手机新建的会话下发 <code>approvalPolicy: never</code>，即不再逐条询问授权；可在插件配置里改成 <code>ask</code>。</li>
+    </ol>
+  </div>
+
+  <div class="foot">dsh-phone-remote · 本页面只在 <code>127.0.0.1</code> 上提供，手机打开的是精简版聊天界面。</div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { token: "", primary: "", reveal: false };
+
+  function copy(value, button) {
+    var done = function () {
+      var old = button.textContent;
+      button.textContent = "已复制 ✓";
+      setTimeout(function () { button.textContent = old; }, 1400);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(value).then(done, function () { fallback(); });
+    } else { fallback(); }
+    function fallback() {
+      var ta = document.createElement("textarea");
+      ta.value = value; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); done(); } catch (e) {}
+      ta.remove();
+    }
+  }
+
+  function drawQr(rows) {
+    var canvas = $("qr");
+    var ctx = canvas.getContext("2d");
+    var size = rows.length;
+    var quiet = 4;
+    var total = size + quiet * 2;
+    var scale = Math.max(1, Math.floor(canvas.width / total));
+    var px = scale * total;
+    var offset = Math.floor((canvas.width - px) / 2);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#000";
+    for (var y = 0; y < size; y++) {
+      var row = rows[y];
+      for (var x = 0; x < size; x++) {
+        if (row[x] === "1") ctx.fillRect(offset + (x + quiet) * scale, offset + (y + quiet) * scale, scale, scale);
+      }
+    }
+  }
+
+  function loadQr(text) {
+    fetch("/api/qr?text=" + encodeURIComponent(text))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.rows) drawQr(data.rows);
+      })
+      .catch(function () {});
+  }
+
+  function render(data) {
+    state.token = data.token || "";
+    state.primary = (data.urls && data.urls[0] && data.urls[0].url) || "";
+    $("listen").textContent = "已监听 " + data.host + ":" + data.port;
+    $("s-listen").textContent = data.host + ":" + data.port;
+    $("statefile").textContent = data.statePath;
+    $("s-cwd").textContent = data.defaultCwd || "（未配置，使用 DSH 默认）";
+
+    var urls = $("urls");
+    urls.textContent = "";
+    (data.urls || []).forEach(function (entry, index) {
+      var row = document.createElement("div");
+      row.className = "urlrow" + (index === 0 ? " primary" : "");
+      var u = document.createElement("span");
+      u.className = "u";
+      // Show the friendly URL with the token hidden behind a placeholder only
+      // when the token is long; the copy button always copies the full link.
+      u.textContent = entry.url.replace(/([?&]t=)[^&]+/, "$1••••••");
+      var tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = entry.name + (entry.primary ? " · 推荐" : "");
+      var btn = document.createElement("button");
+      btn.textContent = "复制";
+      btn.addEventListener("click", function () { copy(entry.url, btn); });
+      row.appendChild(u); row.appendChild(tag); row.appendChild(btn);
+      urls.appendChild(row);
+    });
+
+    $("s-token").textContent = state.reveal ? state.token : state.token.replace(/./g, "•");
+    $("copy-token").onclick = function () { copy(state.token, $("copy-token")); };
+    $("reveal").onclick = function () {
+      state.reveal = !state.reveal;
+      $("reveal").textContent = state.reveal ? "隐藏" : "显示";
+      $("s-token").textContent = state.reveal ? state.token : state.token.replace(/./g, "•");
+    };
+
+    var sessions = data.sessions || [];
+    var running = sessions.filter(function (s) { return s.running; }).length;
+    $("s-sessions").textContent = sessions.length + " / " + running;
+    var box = $("sessions");
+    box.textContent = "";
+    if (!sessions.length) {
+      box.innerHTML = '<p class="hint" style="margin:0">暂无会话，手机端可以直接新建。</p>';
+    }
+    sessions.slice(0, 12).forEach(function (s) {
+      var row = document.createElement("div");
+      row.className = "sess";
+      var t = document.createElement("span");
+      t.className = "t";
+      t.textContent = s.title || s.cwd || s.sessionId;
+      var m = document.createElement("span");
+      m.className = "m";
+      m.textContent = (s.cwd ? s.cwd + " · " : "") + (s.updatedAt ? new Date(s.updatedAt).toLocaleString() : s.sessionId);
+      row.appendChild(t);
+      row.appendChild(m);
+      if (s.running) {
+        var p = document.createElement("span");
+        p.className = "pill run";
+        p.textContent = "运行中";
+        row.appendChild(p);
+      }
+      box.appendChild(row);
+    });
+
+    $("copy-primary").onclick = function () { copy(state.primary, $("copy-primary")); };
+    if (state.primary) loadQr(state.primary);
+    renderAccess(data.access);
+  }
+
+  function accessAction(action, ip) {
+    fetch("/api/panel/access", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: action, ip: ip })
+    }).then(function (r) { return r.json(); }).then(function () { refresh(); })
+      .catch(function () {});
+  }
+
+  function chipRow(ip, tail, buttonLabel, onClick, cls) {
+    var row = document.createElement("div");
+    row.className = "urlrow" + (cls ? " " + cls : "");
+    var u = document.createElement("span");
+    u.className = "u";
+    u.textContent = ip;
+    var tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = tail;
+    row.appendChild(u); row.appendChild(tag);
+    if (buttonLabel) {
+      var btn = document.createElement("button");
+      btn.textContent = buttonLabel;
+      btn.addEventListener("click", onClick);
+      row.appendChild(btn);
+    }
+    return row;
+  }
+
+  function renderAccess(access) {
+    if (!access) return;
+    var enabled = access.enabled === true;
+    $("a-mode").textContent = access.fromConfig
+      ? "仅白名单（由插件配置 allowFrom 管理，共 " + access.ips.length + " 条）"
+      : enabled ? "仅白名单（" + access.ips.length + " 条）" : "开放（任何设备凭口令可访问）";
+    var toggle = $("a-toggle");
+    if (access.fromConfig) {
+      toggle.textContent = "由配置管理（请在 cordis.patch.yml 里改）";
+      toggle.disabled = true;
+      $("a-clear").disabled = true;
+    } else {
+      toggle.disabled = false;
+      $("a-clear").disabled = false;
+      toggle.textContent = enabled ? "关闭白名单（恢复开放）" : "启用「仅白名单」";
+      toggle.onclick = function () { accessAction(enabled ? "disable" : "enable"); };
+      $("a-clear").onclick = function () {
+        if (confirm("清空白名单并恢复开放访问？")) accessAction("clear");
+      };
+    }
+
+    var ips = $("a-ips");
+    ips.textContent = "";
+    if (!access.ips.length) {
+      ips.innerHTML = '<p class="hint" style="margin:0">（空）白名单为空时不会拦截任何设备。</p>';
+    }
+    access.ips.forEach(function (ip) {
+      ips.appendChild(chipRow(ip, "已允许", access.fromConfig ? "" : "移除",
+        function () { accessAction("remove", ip); }, "primary"));
+    });
+
+    var recent = $("a-recent");
+    recent.textContent = "";
+    if (!access.recent.length) {
+      recent.innerHTML = '<p class="hint" style="margin:0">还没有外部设备访问过。手机打开链接后这里就会出现它的 IP。</p>';
+    }
+    access.recent.forEach(function (client) {
+      var tail = (client.allowed ? "已允许" : "已拦截") + " · " + client.hits + " 次 · " +
+        new Date(client.lastSeen).toLocaleTimeString();
+      var already = access.ips.indexOf(client.ip) >= 0;
+      recent.appendChild(chipRow(
+        client.ip,
+        tail,
+        access.fromConfig || already ? "" : "允许",
+        function () { accessAction("allow", client.ip); },
+        client.allowed ? "" : ""
+      ));
+    });
+  }
+
+  function refresh() {
+    fetch("/api/panel/state")
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function (e) { $("listen").textContent = "无法读取状态"; });
+  }
+
+  $("rotate").addEventListener("click", function () {
+    if (!confirm("重置后旧链接会立即失效，手机上需要重新扫码/输入口令。继续？")) return;
+    fetch("/api/panel/rotate", { method: "POST" })
+      .then(function () { refresh(); })
+      .catch(function () {});
+  });
+
+  refresh();
+  setInterval(refresh, 5000);
+})();
+</script>
+</body>
+</html>

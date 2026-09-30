@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="DSH mobile remote">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4c8dff"/>
+      <stop offset="1" stop-color="#2f6fe0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="#0b0f16"/>
+  <rect x="21" y="9" width="22" height="38" rx="6" fill="none" stroke="url(#g)" stroke-width="3.2"/>
+  <rect x="26.5" y="13.5" width="11" height="24" rx="2.5" fill="url(#g)" opacity=".28"/>
+  <circle cx="32" cy="42.5" r="2.1" fill="url(#g)"/>
+  <path d="M43.5 20.5c4.6 1.4 7.8 5.5 7.8 10.4 0 6-4.9 10.9-10.9 10.9" fill="none" stroke="#3ddc97" stroke-width="3" stroke-linecap="round"/>
+  <path d="M45 27.4c2 .8 3.4 2.8 3.4 5.1 0 3.1-2.5 5.6-5.6 5.6" fill="none" stroke="#3ddc97" stroke-width="3" stroke-linecap="round" opacity=".75"/>
+  <circle cx="47" cy="47" r="6.5" fill="#0b0f16" stroke="#3ddc97" stroke-width="2.6"/>
+  <path d="M44.4 47.1l1.9 1.9 3.4-3.7" fill="none" stroke="#3ddc97" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

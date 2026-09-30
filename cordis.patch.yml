@@ -1,0 +1,26 @@
+# dsh-phone-remote profile patch layer — one loader entry for the plugin.
+#
+# Every config key is optional; the defaults below are what the plugin uses
+# when a key is omitted, so this row can stay as-is:
+#
+#   - id: phone-remote
+#     name: 'dsh-phone-remote'
+#     config:
+#       enabled: true          # false parks the plugin without unloading it
+#       host: '0.0.0.0'        # 0.0.0.0 = reachable from your phone on the LAN
+#       port: 8790             # first port tried; busy ports walk forward to 8799
+#       token: ''              # empty = reuse/generate one in $DSH_HOME
+#       cwd: ''                # default working directory for new phone sessions
+#       agentPreset: ''        # agent preset id for new phone sessions
+#       approvalPolicy: 'never' # 'never' | 'ask' — policy applied to phone sessions
+#       allowCreate: true      # allow the phone to start new sessions
+#       allowCancel: true      # allow the phone to stop a running turn
+#       exposePanel: true      # serve the loopback-only desktop panel at /
+#       allowFrom: []          # e.g. ['203.0.113.42', '192.168.1.', '10.0.0.0/8']
+#                              # Non-empty = only these clients may use the phone
+#                              # surface, and the panel can no longer edit the list.
+#                              # Leave empty to manage the list from the panel
+#                              # (访问控制 → 启用「仅白名单」), which needs no restart.
+- insert:
+    - id: phone-remote
+      name: 'dsh-phone-remote'

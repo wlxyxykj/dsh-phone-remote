@@ -1,0 +1,13 @@
+# dependencies / build artifacts
+node_modules/
+*.tgz
+*.log
+
+# local scratch (asar tooling, reference implementations, dev logs)
+scratch/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
