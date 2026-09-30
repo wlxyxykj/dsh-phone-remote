@@ -51,6 +51,10 @@
   "bugs": {
     "url": "https://github.com/wlxyxykj/dsh-phone-remote/issues"
   },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
