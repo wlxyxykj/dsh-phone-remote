@@ -1,0 +1,5 @@
+# Keep one line-ending convention across platforms; the sources are LF.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.tgz binary
