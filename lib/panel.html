@@ -92,15 +92,17 @@ code{background:#000a;padding:1px 6px;border-radius:5px;font-family:ui-monospace
 
   <div class="card">
     <h2>访问控制</h2>
-    <p class="hint">默认<strong>开放</strong>：任何能连到本机的设备都能打开登录页（仍需口令）。启用「仅白名单」后，只有名单里的 IP 能访问，其余一律 403。</p>
+    <p class="hint"><strong>口令优先（默认）</strong>：带着正确口令的设备一律放行，换 Wi-Fi、换流量都不用在这台电脑上点允许。
+      白名单只拦「没带口令就敲门」的设备。<strong>严格模式</strong>会把白名单变成硬门禁——名单外的设备即使口令正确也被拒绝。</p>
     <div class="row"><span class="k">当前模式</span><span class="v" id="a-mode">—</span></div>
     <div style="display:flex;gap:9px;flex-wrap:wrap;margin:12px 0 4px">
       <button class="p" id="a-toggle">启用「仅白名单」</button>
+      <button class="p" id="a-strict">切换严格模式</button>
       <button id="a-clear">清空白名单并恢复开放</button>
     </div>
     <div style="font-size:13px;color:var(--dim);margin:14px 0 6px">白名单</div>
     <div id="a-ips"></div>
-    <div style="font-size:13px;color:var(--dim);margin:14px 0 6px">最近访问的客户端（手机换网络后新 IP 会出现在这里，点「允许」即可）</div>
+    <div style="font-size:13px;color:var(--dim);margin:14px 0 6px">最近访问的客户端（没带口令的设备会标「已拦截」，点「允许」即放行）</div>
     <div id="a-recent"></div>
   </div>
 
@@ -114,8 +116,8 @@ code{background:#000a;padding:1px 6px;border-radius:5px;font-family:ui-monospace
     <h2>安全须知</h2>
     <ol>
       <li>链接里的口令就是全部凭证：拿到它的人可以在你的电脑上让 Agent 执行操作。别把链接发到群里或截图发出去。</li>
-      <li>这台电脑有公网 IP 时，<code>8790</code> 端口对全网可见——请在「访问控制」里启用「仅白名单」，只放行你手机的 IP。</li>
-      <li>手机用移动数据时 IP 会变：变了就在上面的「最近访问」里点一下「允许」。</li>
+      <li>这台电脑有公网 IP 时，<code>8790</code> 端口对全网可见。默认的「口令优先」已经够用：没带口令的扫描者进不来，而你的手机无论换到哪个网络都能连。想更严一点再开「严格模式」。</li>
+      <li>手机换网络后如果显示「此设备未授权」，说明那次请求没带口令——用面板上的链接/二维码（里面含口令）访问即可，不用在这里点允许。</li>
       <li>公共 Wi-Fi 下建议用完就在配置里设 <code>enabled: false</code>，或点上面的“重置口令”。</li>
       <li>默认给手机新建的会话下发 <code>approvalPolicy: never</code>，即不再逐条询问授权；可在插件配置里改成 <code>ask</code>。</li>
     </ol>
@@ -277,19 +279,30 @@ code{background:#000a;padding:1px 6px;border-radius:5px;font-family:ui-monospace
   function renderAccess(access) {
     if (!access) return;
     var enabled = access.enabled === true;
+    var strict = access.strict === true;
     $("a-mode").textContent = access.fromConfig
-      ? "仅白名单（由插件配置 allowFrom 管理，共 " + access.ips.length + " 条）"
-      : enabled ? "仅白名单（" + access.ips.length + " 条）" : "开放（任何设备凭口令可访问）";
+      ? "白名单由插件配置 allowFrom 管理（共 " + access.ips.length + " 条）" + (strict ? " · 严格模式" : " · 口令优先")
+      : !enabled
+        ? "开放（任何设备凭口令可访问）"
+        : strict
+          ? "严格白名单（" + access.ips.length + " 条）：名单外的设备一律拒绝，即使口令正确"
+          : "白名单 " + access.ips.length + " 条 · 口令优先：带对口令的设备始终放行";
     var toggle = $("a-toggle");
+    var strictButton = $("a-strict");
     if (access.fromConfig) {
       toggle.textContent = "由配置管理（请在 cordis.patch.yml 里改）";
       toggle.disabled = true;
+      strictButton.disabled = true;
+      strictButton.textContent = strict ? "严格模式（由配置固定）" : "口令优先（由配置固定）";
       $("a-clear").disabled = true;
     } else {
       toggle.disabled = false;
+      strictButton.disabled = false;
       $("a-clear").disabled = false;
       toggle.textContent = enabled ? "关闭白名单（恢复开放）" : "启用「仅白名单」";
+      strictButton.textContent = strict ? "关闭严格模式（改为口令优先）" : "开启严格模式（白名单变硬门禁）";
       toggle.onclick = function () { accessAction(enabled ? "disable" : "enable"); };
+      strictButton.onclick = function () { accessAction(strict ? "loose" : "strict"); };
       $("a-clear").onclick = function () {
         if (confirm("清空白名单并恢复开放访问？")) accessAction("clear");
       };

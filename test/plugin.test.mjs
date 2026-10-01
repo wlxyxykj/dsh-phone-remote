@@ -153,8 +153,9 @@ describe("dsh-phone-remote plugin", () => {
 		const shape = schema.shape;
 		assert.deepEqual(Object.keys(shape), [
 			"enabled", "host", "port", "token", "cwd", "agentPreset",
-			"approvalPolicy", "allowCreate", "allowCancel", "exposePanel", "allowFrom"
+			"approvalPolicy", "allowCreate", "allowCancel", "exposePanel", "allowFrom", "strictAllowlist"
 		]);
+		assert.equal(shape.strictAllowlist.__node.default, false, "口令优先是默认");
 		assert.equal(shape.port.__node.type, "natural");
 		assert.equal(shape.port.__node.max, 65535);
 		assert.equal(shape.allowFrom.__node.type, "array");
@@ -413,6 +414,48 @@ describe("dsh-phone-remote plugin", () => {
 			await assert.rejects(() => tool.execute({ path: "" }, {}), /path 不能为空/);
 		} finally {
 			rmSync(directory, { recursive: true, force: true });
+			await mounted.dispose();
+		}
+	});
+
+	it("keeps the key working from any network, and persists the strict switch", async () => {
+		const mounted = await mount();
+		try {
+			// An allowlist that does not contain the test client at all.
+			const allow = await (await fetch(`${mounted.base}/api/panel/access`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ action: "allow", ip: "203.0.113.9" })
+			})).json();
+			assert.equal(allow.ok, true);
+			assert.equal(allow.access.enabled, true);
+			assert.equal(allow.access.strict, false, "默认是口令优先");
+
+			// With the key: in. Without it: still gated.
+			assert.equal((await fetch(`${mounted.base}/api/m/state`, { headers: { "x-mobile-token": TOKEN } })).status, 200);
+			assert.equal((await fetch(`${mounted.base}/api/m/state`)).status, 401);
+
+			// The panel switch is durable, and never disturbs the token.
+			const strict = await (await fetch(`${mounted.base}/api/panel/access`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ action: "strict" })
+			})).json();
+			assert.equal(strict.access.strict, true);
+			const stateFile = join(process.env.DSH_HOME, "dsh-phone-remote.json");
+			const persisted = JSON.parse(readFileSync(stateFile, "utf8"));
+			assert.equal(persisted.strictAllowlist, true);
+			assert.equal(persisted.allowEnabled, true);
+			assert.equal(persisted.token, TOKEN, "访问控制的变化不动口令");
+
+			const loose = await (await fetch(`${mounted.base}/api/panel/access`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ action: "loose" })
+			})).json();
+			assert.equal(loose.access.strict, false);
+			assert.equal(JSON.parse(readFileSync(stateFile, "utf8")).strictAllowlist, false);
+		} finally {
 			await mounted.dispose();
 		}
 	});

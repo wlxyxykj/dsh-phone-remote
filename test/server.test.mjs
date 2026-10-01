@@ -474,6 +474,15 @@ describe("access control", () => {
 		assert.equal(server.accessState().enabled, false);
 		assert.ok(changes.length >= 4, "every change is reported for persistence");
 
+		// The strict switch: default off (token wins), and it also turns the list on.
+		assert.equal(server.accessState().strict, false, "口令优先是默认");
+		assert.equal(server.applyAccessAction("strict").ok, true);
+		assert.equal(server.accessState().strict, true);
+		assert.equal(server.accessState().enabled, true, "strict mode implies the list is on");
+		assert.equal(server.applyAccessAction("loose").ok, true);
+		assert.equal(server.accessState().strict, false);
+		assert.equal(server.applyAccessAction("nonsense").ok, false);
+
 		const owned = new MobileServer({
 			config: {},
 			token: "t",
@@ -524,7 +533,7 @@ describe("access control", () => {
 		}
 	});
 
-	it("turns away a remote client that is not allowlisted", async () => {
+	it("lets a correct token through the allowlist, and only strict mode fences it off", async () => {
 		// Bind every interface and talk to the machine through a non-loopback
 		// address, so the request really is a remote one.
 		const addresses = Object.values((await import("node:os")).networkInterfaces())
@@ -544,27 +553,42 @@ describe("access control", () => {
 		const bound = await server.start();
 		let reachable = false;
 		try {
+			// Talk to this machine through its own LAN address: from the server's
+			// point of view that is a remote client whose IP is *not* allowlisted.
 			const url = `http://${addresses[0].address}:${bound.port}/api/m/state`;
-			let response;
 			try {
-				response = await fetch(url, { headers: { "x-mobile-token": "test-token-123" }, signal: AbortSignal.timeout(4000) });
+				const refused = await fetch(url, { signal: AbortSignal.timeout(4000) });
 				reachable = true;
+				assert.equal(refused.status, 403, "no token + not allowlisted is still refused");
+				assert.match((await refused.json()).error.message, /未授权/);
 			} catch {
 				return; // the interface is not reachable locally; covered by the unit tests above
 			}
-			assert.equal(response.status, 403, "a non-allowlisted remote client is refused");
-			const body = await response.json();
-			assert.match(body.error.message, /未授权/);
 
 			// The panel (loopback) still works and now shows the blocked client.
 			const panel = await (await fetch(`http://127.0.0.1:${bound.port}/api/panel/state`)).json();
 			assert.equal(panel.access.enabled, true);
+			assert.equal(panel.access.strict, false, "口令优先是默认");
 			assert.ok(panel.access.recent.some((client) => client.allowed === false), "the blocked client is recorded");
 
-			// Allow it, and the very same request goes through.
+			// The point of the whole feature: with the key, the same device gets in
+			// from any network without anyone touching this computer.
+			const withKey = await fetch(url, { headers: { "x-mobile-token": "test-token-123" }, signal: AbortSignal.timeout(4000) });
+			assert.equal(withKey.status, 200, "带对口令的设备无视白名单");
+
+			// Strict mode is the old behaviour, for anyone who wants it.
+			assert.equal(server.applyAccessAction("strict").ok, true);
+			const strict = await fetch(url, { headers: { "x-mobile-token": "test-token-123" }, signal: AbortSignal.timeout(4000) });
+			assert.equal(strict.status, 403, "严格模式下连口令正确也被拦");
+
+			assert.equal(server.applyAccessAction("loose").ok, true);
+			const loose = await fetch(url, { headers: { "x-mobile-token": "test-token-123" }, signal: AbortSignal.timeout(4000) });
+			assert.equal(loose.status, 200, "切回口令优先立即恢复");
+
+			// Allowlisting still lets a keyless client reach the login page (401, not 403).
 			server.applyAccessAction("allow", normalizeAddress(addresses[0].address));
-			const after = await fetch(url, { headers: { "x-mobile-token": "test-token-123" }, signal: AbortSignal.timeout(4000) });
-			assert.equal(after.status, 200, "allowing the client lets it in without a restart");
+			const allowed = await fetch(url, { signal: AbortSignal.timeout(4000) });
+			assert.equal(allowed.status, 401, "在白名单里但没有口令 → 提示输入口令");
 		} finally {
 			await server.stop();
 		}

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Phone Remote",
-    "description": "Serve a token-protected mobile page so a phone can drive the agents on this computer: list sessions, send prompts, watch live output, stop a turn, upload files to the agent and download the files it produces. Optional IP allowlist, Tailscale friendly."
+    "description": "Serve a token-protected mobile page so a phone can drive the agents on this computer: list sessions, send prompts, watch live output, stop a turn, upload files to the agent and download the files it produces. The token is the credential, so the phone works from any network; optional IP allowlist with a strict mode, Tailscale friendly."
   }
 }
