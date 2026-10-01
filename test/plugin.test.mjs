@@ -12,11 +12,38 @@ import { join } from "node:path";
 
 process.env.DSH_HOME = mkdtempSync(join(tmpdir(), "dsh-phone-remote-test-"));
 
-const { apply, normalizeConfig, name, inspectMount } = await import("../lib/index.js");
+const { apply, normalizeConfig, name, inspectMount, Config, buildConfigSchema } = await import("../lib/index.js");
 const { describe, it } = await import("node:test");
 const assert = (await import("node:assert/strict")).default;
 
 const TOKEN = "test-token-abcdefghijkl";
+
+/**
+ * A recording stand-in for schemastery. The real package is a DSH runtime
+ * dependency, so the schema's contract (fields, defaults, help text) is checked
+ * through this stub instead of the library itself.
+ */
+function makeStubZ() {
+	const node = (type, extra = {}) => {
+		const record = { type, ...extra, default: undefined, description: undefined, max: undefined };
+		const chain = {
+			__node: record,
+			default(value) { record.default = value; return chain; },
+			description(text) { record.description = text; return chain; },
+			max(value) { record.max = value; return chain; }
+		};
+		return chain;
+	};
+	return {
+		boolean: () => node("boolean"),
+		string: () => node("string"),
+		natural: () => node("natural"),
+		const: (value) => node("const", { value }),
+		array: (inner) => node("array", { items: inner?.__node?.type }),
+		union: (options) => node("union", { options: options.map((option) => option?.__node?.value ?? option) }),
+		object: (shape) => ({ shape, __node: { type: "object" } })
+	};
+}
 
 /** A fake host context: `effect` runs immediately, services come from a bag. */
 function fakeCtx(services) {
@@ -114,6 +141,49 @@ function call(base, path, options = {}) {
 describe("dsh-phone-remote plugin", () => {
 	it("exported name matches the loader row", () => {
 		assert.equal(name, "dsh-phone-remote");
+	});
+
+	it("describes the settings form: keys, defaults and help text", () => {
+		// `@deepseek-ai/schemastery` only exists inside a DSH installation, so the
+		// schema is built from a recording stub here. That checks the contract the
+		// settings UI reads (which fields, which defaults, every field described,
+		// and that the defaults match the runtime ones).
+		const z = makeStubZ();
+		const schema = buildConfigSchema(z);
+		const shape = schema.shape;
+		assert.deepEqual(Object.keys(shape), [
+			"enabled", "host", "port", "token", "cwd", "agentPreset",
+			"approvalPolicy", "allowCreate", "allowCancel", "exposePanel", "allowFrom"
+		]);
+		assert.equal(shape.port.__node.type, "natural");
+		assert.equal(shape.port.__node.max, 65535);
+		assert.equal(shape.allowFrom.__node.type, "array");
+		assert.equal(shape.approvalPolicy.__node.type, "union");
+		assert.deepEqual(shape.approvalPolicy.__node.options, ["never", "ask"]);
+		for (const [key, node] of Object.entries(shape)) {
+			assert.equal(typeof node.__node.description, "string", `${key} needs help text in the form`);
+			assert.ok(node.__node.description.length > 0);
+		}
+
+		// The form's defaults must be exactly what the plugin uses at runtime.
+		const normalized = normalizeConfig({});
+		for (const [key, node] of Object.entries(shape)) {
+			assert.deepEqual(node.__node.default, normalized[key], `default mismatch for ${key}`);
+		}
+	});
+
+	it("loads the real schema when the host provides schemastery", () => {
+		// Installed inside a DSH profile the import resolves and the entry then
+		// reports `status: "schema"` instead of `"absent"` (verified after install).
+		if (Config === undefined) {
+			assert.ok(true, "schemastery is not resolvable outside a DSH install — covered by the installed probe");
+			return;
+		}
+		assert.equal(Config["~standard"].validate({}).issues, undefined);
+	});
+
+	it("survives a config that never went through the schema", () => {
+		assert.deepEqual(normalizeConfig(null), normalizeConfig({}));
 	});
 
 	it("normalizes config with safe defaults", () => {

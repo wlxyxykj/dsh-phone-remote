@@ -111,6 +111,11 @@ http://127.0.0.1:8790/
 
 ## 使用：三步上手
 
+> **日常使用只需记住一件事**：插件是**跟着 DSH 桌面版自动启动的**，你不需要单独启动它。
+> DSH 开着 → 插件在跑 → 手机能连；关掉 DSH → 端口关闭 → 手机连不上。
+> 想让手机随时能连，就把 **DSH 桌面版设为开机自启**（Windows 设置 → 应用 → 启动，
+> 或把 `DeepSeek Harness.exe` 的快捷方式放进 `shell:startup`）。
+
 ### 第 1 步：在电脑上打开控制台
 
 浏览器打开 **http://127.0.0.1:8790/**
@@ -191,7 +196,9 @@ Agent 需要把文件给你时，它会调用工具 `phone_send_file`；你也�
 
 两种改法，任选一种（**改配置不用重启**，保存即生效）：
 
-**A. 在 DSH 里改**：设置 → 插件 → `dsh-phone-remote` → 配置
+**A. 在 DSH 设置里改（推荐）**：设置 → 插件 → `dsh-phone-remote`，会看到完整的设置表单——
+开关、监听地址/端口、访问口令、新会话默认目录、授权策略、权限开关、IP 白名单，每项都带说明。
+（插件导出了配置 schema，所以设置页能渲染出这些字段。）
 
 **B. 改 profile 的 `cordis.patch.yml`**（`$DSH_HOME/profiles/<profile>/cordis.patch.yml`），加一行：
 
@@ -331,10 +338,10 @@ DSH 目前**不支持插件自动更新**，升级要手动来：
 
 ```powershell
 dsh plugin --profile desktop remove dsh-phone-remote   # 卸载
-dsh plugin --profile desktop add github:wlxyxykj/dsh-phone-remote#v1.1.0   # 装指定版本
+dsh plugin --profile desktop add github:wlxyxykj/dsh-phone-remote#v1.2.0   # 装指定版本
 ```
 
-用 GitHub 安装时可以用 tag 锁定版本，例如 `github:wlxyxykj/dsh-phone-remote#v1.1.0`。
+用 GitHub 安装时可以用 tag 锁定版本，例如 `github:wlxyxykj/dsh-phone-remote#v1.2.0`。
 
 ---
 
@@ -386,11 +393,11 @@ dsh plugin --profile desktop add github:wlxyxykj/dsh-phone-remote#v1.1.0   # 装
 node --test "test/*.test.mjs"
 ```
 
-93 项测试，覆盖：HTTP 路由 / 口令栅栏 / 限流、IP 白名单（含真实非回环地址的拦截测试）、
+96 项测试，覆盖：HTTP 路由 / 口令栅栏 / 限流、IP 白名单（含真实非回环地址的拦截测试）、
 SSE 流、会话桥接、**文件上传与下载**（含越权、超限、过期文件、SSE 推送）、插件装配、Markdown 渲染、QR 编码。
 
 其中有 4 项是与两套独立 QR 实现（`node-qrcode`、`qrcode-generator`）的逐模块交叉比对，
-需要 `scratch/` 下的参考实现；克隆下来没有它时会自动跳过，其余 89 项照常通过。
+需要 `scratch/` 下的参考实现；克隆下来没有它时会自动跳过，其余 92 项照常通过。
 
 ---
 
