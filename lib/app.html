@@ -189,6 +189,11 @@ header .sub{font-size:11.5px;color:var(--fg-faint);white-space:nowrap;overflow:h
 }
 .center .btn{max-width:340px;width:100%}
 .err-text{color:var(--err);font-size:13px;min-height:18px}
+
+/* ── question notice (enhanced) ─────────────────────────────────────── */
+.notice{align-self:flex-start;max-width:92%;width:100%;background:#101a2a;border:1px solid #2f5c96;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.notice .t{font-size:13px;font-weight:600;color:var(--fg)}
+.notice .b{font-size:13px;line-height:1.5;color:var(--fg-dim);white-space:pre-wrap;word-break:break-word}
 </style>
 </head>
 <body>
@@ -230,6 +235,7 @@ header .sub{font-size:11.5px;color:var(--fg-faint);white-space:nowrap;overflow:h
       <div class="title" id="h-title">DSH 遥控</div>
       <div class="sub" id="h-sub"><span class="dot" id="h-dot"></span><span id="h-state">连接中…</span></div>
     </div>
+    <button class="icon-btn" id="btn-refresh-sess" aria-label="刷新会话列表">⟲</button>
     <button class="icon-btn" id="btn-reload" aria-label="重连">⟳</button>
   </header>
 
@@ -285,6 +291,7 @@ window.__mobileRemoteBooted = true;
     pending: [],         // files uploaded from this phone, waiting to be sent
     delivered: {},       // deliverable ids already rendered as download cards
     toolEls: {},         // callId -> { el, statusEl, outEl }
+    asked: {},           // callId -> true for rendered answer cards (dedupe tool/call vs question relay)
     started: false
   };
 
@@ -521,6 +528,7 @@ window.__mobileRemoteBooted = true;
     state.toolEls = {};
     state.live = null;
     state.thinking = null;
+    state.asked = {};
   }
   function setStatus(kind, label) {
     var dot = $("h-dot");
@@ -564,6 +572,60 @@ window.__mobileRemoteBooted = true;
     var block = msg && (msg.content || []).filter(function (b) { return b && b.type === "tool-result"; })[0];
     return Boolean(block && block.isError);
   }
+  /* ── enhanced: ask/question notice ────────────────────────────────── */
+  // When the agent asks a question via `ask_user_question`, the desktop shows a
+  // card. The phone cannot settle that card directly (the answer must go through
+  // the desktop), so it shows a notice steering the user to answer there — or to
+  // reply as a normal message so the turn can continue.
+  function parseAskArgs(raw) {
+    var args = raw;
+    if (args && typeof args === "object" && !Array.isArray(args) && typeof args.arguments !== "undefined") {
+      args = args.arguments;
+    }
+    if (typeof args === "string") { try { args = JSON.parse(args); } catch (e) { args = {}; } }
+    if (!args || typeof args !== "object") args = {};
+    if (Array.isArray(args)) args = { questions: args };
+    var list = Array.isArray(args.questions) ? args.questions : [args];
+    return list.map(function (q) {
+      if (!q || typeof q !== "object") q = {};
+      var options = [];
+      if (Array.isArray(q.options)) {
+        q.options.forEach(function (opt) {
+          if (typeof opt === "string") options.push(opt);
+          else if (opt && typeof opt === "object" && opt.label) options.push(String(opt.label));
+        });
+      }
+      return {
+        question: String(q.question || q.text || ""),
+        header: String(q.header || ""),
+        options: options
+      };
+    });
+  }
+  function renderAskNotice(data) {
+    closeLive();
+    var callId = String((data && data.callId) || "");
+    if (callId && state.asked[callId]) return;
+    if (callId) state.asked[callId] = true;
+
+    var infos = parseAskArgs(data);
+    var card = el("div", "notice");
+    card.appendChild(el("div", "t", "💡 Agent 在等你回答"));
+    var lines = [];
+    infos.forEach(function (info, i) {
+      var head = "问题 " + (i + 1) + (info.header ? "（" + info.header + "）" : "");
+      var body = info.question ? (head + "：" + info.question) : head;
+      if (info.options.length) {
+        body += "\n" + info.options.map(function (label, n) {
+          return "  " + (n + 1) + ". " + label;
+        }).join("\n");
+      }
+      lines.push(body);
+    });
+    card.appendChild(el("div", "b", lines.join("\n\n") + "\n\n直接在下面对话里打字回答（按问题顺序，回选项序号即可，如：1、2、看电影），答完结束对话，Agent 会继续往下进行。如上方问题未显示，就让 Agent 以文字形式重新发一遍。"));
+    $("log").appendChild(card);
+    scrollDown(true);
+  }
   function handleEvent(ev) {
     var type = ev.type || "";
     var data = ev.data || {};
@@ -584,6 +646,11 @@ window.__mobileRemoteBooted = true;
       return;
     }
     if (type === "tool/call") {
+      // ── enhanced: ask_user_question shows a "please answer" notice ──
+      if (String(data.name || "") === "ask_user_question") {
+        renderAskNotice(data);
+        return;
+      }
       addTool(String(data.callId || ""), String(data.name || "tool"), data.arguments);
       return;
     }
@@ -692,6 +759,17 @@ window.__mobileRemoteBooted = true;
       try {
         (JSON.parse(evt.data) || []).forEach(addFileCard);
       } catch (e) {}
+    });
+    // ── enhanced: host events (session churn only; questions arrive via the
+    // session's own tool/call events, which carry the full arguments) ──
+    es.addEventListener("host-event", function (evt) {
+      var host;
+      try { host = JSON.parse(evt.data); } catch (e) { return; }
+      var name = host && host.event;
+      if (/^session\//.test(name)) {
+        // a session appeared/changed elsewhere → refresh the drawer quietly
+        loadState().catch(function () {});
+      }
     });
     es.addEventListener("error", function () {
       if (es.readyState === EventSource.CLOSED || es.readyState === 2) {
@@ -968,6 +1046,12 @@ window.__mobileRemoteBooted = true;
   $("scrim").addEventListener("click", closeDrawer);
   $("btn-new").addEventListener("click", newSession);
   $("btn-reload").addEventListener("click", function () { loadState().then(connect).catch(function () {}); });
+  // ── enhanced: refresh button pulls the latest session list ─────────
+  $("btn-refresh-sess").addEventListener("click", function () {
+    loadState().then(function () { addBubble("sys", "已刷新会话列表（" + state.sessions.length + " 个）"); }).catch(function (err) {
+      addBubble("err", "刷新失败：" + err.message);
+    });
+  });
   var titlePress = null;
   $("h-title").addEventListener("touchstart", function () { titlePress = Date.now(); });
   $("h-title").addEventListener("touchend", function () {
